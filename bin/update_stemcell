@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_directory() {
+  echo -n "$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
+}
+
+manifest_file() {
+  echo "$(repo_directory)/manifests/cfcr.yml"
+}
+
+gnused() {
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "gsed"
+  elif [[ "$(uname -s)" == "Linux" ]]; then
+    echo "sed"
+  else
+    echo "This only works on Linux and Mac." >&2
+    exit 1
+  fi
+}
+
+main() {
+  local new_version=$1
+
+  $(gnused) -i ':a;$!{N;ba};s|\(stemcells:\n- alias: trusty\n  os: ubuntu-trusty\n  version:\)[^\n]*\n|\1 "'"$new_version"'"\n|' "$(manifest_file)"
+}
+
+[[ "$0" == "${BASH_SOURCE[0]}" ]] && main "$@"
+
+# Problems:
+# version passed?
