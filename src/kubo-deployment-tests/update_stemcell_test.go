@@ -2,7 +2,9 @@ package kubo_deployment_tests_test
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 
 	. "github.com/jhvhs/gob-mock"
 	. "github.com/onsi/ginkgo"
@@ -12,20 +14,27 @@ import (
 )
 
 var _ = Describe("UpdateStemcell", func() {
-	It("should update the manifest with the given version", func() {
+
+	var mockManifest, manifest string
+
+	BeforeEach(func() {
 		bash.Source(pathToScript("update_stemcell"), nil)
 		bash.Source("", func(string) ([]byte, error) {
 			return repoDirectoryFunction, nil
 		})
 
-		manifest := pathFromRoot("manifests/cfcr.yml")
-		mockManifest := "/tmp/mock-cfcr.yml"
+		manifest = pathFromRoot("manifests/cfcr.yml")
+		mockManifest = "/tmp/mock-cfcr.yml"
 		cpCmd := exec.Command("cp", "-f", manifest, mockManifest)
 		err := cpCmd.Run()
 		Expect(err).ToNot(HaveOccurred())
 
-		manifestFileMock := Mock("manifest_file", fmt.Sprintf("echo %s", mockManifest))
-		ApplyMocks(bash, []Gob{manifestFileMock})
+		manifestFileFunctionMock := Mock("manifest_file", fmt.Sprintf("echo %s", mockManifest))
+		ApplyMocks(bash, []Gob{manifestFileFunctionMock})
+	})
+
+
+	It("should update the manifest with the given version when there's a different version", func() {
 
 		exitCode, err := bash.Run("main", []string{"new-stemcell-version"})
 		Expect(err).ToNot(HaveOccurred())
@@ -38,20 +47,27 @@ var _ = Describe("UpdateStemcell", func() {
 		Eventually(session).Should(gbytes.Say("^new-stemcell-version\n$"))
 	})
 
-	It("should keep the order of the manifest the same", func() {
-		bash.Source(pathToScript("update_stemcell"), nil)
-		bash.Source("", func(string) ([]byte, error) {
-			return repoDirectoryFunction, nil
-		})
+	It("should not update the manifest when the version is the same", func() {
 
-		manifest := pathFromRoot("manifests/cfcr.yml")
-		mockManifest := "/tmp/mock-cfcr.yml"
-		cpCmd := exec.Command("cp", "-f", manifest, mockManifest)
-		err := cpCmd.Run()
+		fileInfo, err := os.Stat(mockManifest)
+		lastModTimeBefore := fileInfo.ModTime()
+
+		cmd := exec.Command("bosh-cli", "int", mockManifest, "--path=/stemcells/0/version")
+		session, err := gexec.Start(cmd, GinkgoWriter, GinkgoWriter)
 		Expect(err).ToNot(HaveOccurred())
+		Eventually(session).Should(gexec.Exit(0))
+		currentVersion := strings.TrimSuffix(string(session.Out.Contents()), "\n")
 
-		manifestFileMock := Mock("manifest_file", fmt.Sprintf("echo %s", mockManifest))
-		ApplyMocks(bash, []Gob{manifestFileMock})
+		exitCode, err := bash.Run("main", []string{currentVersion})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(exitCode).To(Equal(0))
+
+		fileInfo, err = os.Stat(mockManifest)
+		lastModTimeAfter := fileInfo.ModTime()
+		Expect(lastModTimeAfter).To(Equal(lastModTimeBefore))
+	})
+
+	It("should keep the order of the manifest the same", func() {
 
 		exitCode, err := bash.Run("main", []string{"new-stemcell-version"})
 		Expect(err).ToNot(HaveOccurred())
@@ -64,4 +80,5 @@ var _ = Describe("UpdateStemcell", func() {
 		Eventually(session).Should(gexec.Exit(0))
 		Eventually(session).Should(gbytes.Say("^       2\n$"))
 	})
+
 })
